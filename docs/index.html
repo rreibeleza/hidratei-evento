@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1a455f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Hidratei 1 km">
+  <title>Desafio 1 km Hidratei</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icone-192.png">
+  <link rel="apple-touch-icon" href="icone-192.png">
+  <link rel="preload" href="fonts/outfit.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="estilo.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <main>
+    <!-- 1. Início -->
+    <section id="inicio" class="tela tela--hero ativa">
+      <img class="logo logo--grande" src="logo.svg" alt="Hidratei">
+      <h1 class="hero-titulo">Desafio <span>1 km</span></h1>
+      <p class="hero-sub">Corra 1 km em menos de <strong>6 minutos</strong> e ganhe um brinde.</p>
+      <button class="botao botao--grande" data-ir="cadastro">Quero participar</button>
+      <nav class="rodape-inicio">
+        <button class="link" data-ir="ranking">Ranking</button>
+        <button class="link" data-ir="pin">Promotora</button>
+      </nav>
+    </section>
+
+    <!-- 2. Cadastro -->
+    <section id="cadastro" class="tela">
+      <header class="topo"><button class="voltar" data-ir="inicio" aria-label="Voltar">‹</button><h2>Seus dados</h2><span class="passo">1 de 2</span></header>
+      <form id="form-cadastro" class="cartao" novalidate autocomplete="off">
+        <label class="campo">Nome completo
+          <input name="nome" autocapitalize="words" autocomplete="off" required>
+          <small class="erro" data-erro="nome"></small>
+        </label>
+        <div class="linha">
+          <label class="campo">CPF
+            <input name="cpf" inputmode="numeric" placeholder="000.000.000-00" data-mascara="cpf" required>
+            <small class="erro" data-erro="cpf"></small>
+          </label>
+          <label class="campo">Data de nascimento
+            <input name="nascimento" inputmode="numeric" placeholder="DD/MM/AAAA" data-mascara="data" required>
+            <small class="erro" data-erro="nascimento"></small>
+          </label>
+        </div>
+        <div class="linha">
+          <label class="campo">Celular
+            <input name="celular" inputmode="tel" placeholder="(00) 00000-0000" data-mascara="celular" required>
+            <small class="erro" data-erro="celular"></small>
+          </label>
+          <label class="campo"><span>E-mail <em>(opcional)</em></span>
+            <input name="email" type="email" inputmode="email" autocapitalize="off">
+            <small class="erro" data-erro="email"></small>
+          </label>
+        </div>
+        <button class="botao" type="submit">Continuar</button>
+      </form>
+    </section>
+
+    <!-- 3. Termo + assinatura -->
+    <section id="termo" class="tela">
+      <header class="topo"><button class="voltar" data-ir="cadastro" aria-label="Voltar">‹</button><h2 id="termo-titulo"></h2><span class="passo">2 de 2</span></header>
+      <div class="cartao cartao--termo">
+        <p id="termo-rascunho" class="selo-rascunho" hidden>RASCUNHO — texto provisório, não usar no evento</p>
+        <div id="termo-texto" class="termo-texto" tabindex="0"></div>
+        <p id="termo-dica" class="dica">Role até o fim do texto para continuar.</p>
+        <label class="aceite"><input type="checkbox" id="termo-aceite" disabled> Li e concordo com o termo acima.</label>
+        <div class="assinatura">
+          <div class="assinatura-cabecalho"><span>Assine aqui com o dedo</span><button class="link" id="assinatura-limpar" type="button">Limpar</button></div>
+          <canvas id="assinatura-canvas" aria-label="Área de assinatura"></canvas>
+        </div>
+        <button class="botao" id="termo-confirmar" disabled>Assinar e confirmar</button>
+      </div>
+    </section>
+
+    <!-- 4. Confirmação -->
+    <section id="pronto" class="tela tela--hero">
+      <img class="logo" src="logo.svg" alt="Hidratei">
+      <h1 class="hero-titulo">Tudo certo, <span id="pronto-nome"></span>!</h1>
+      <p class="hero-sub">Seu número de participante</p>
+      <p class="numero-grande" id="pronto-numero"></p>
+      <p class="hero-sub">Procure a promotora para fazer a sua corrida.</p>
+      <button class="botao" data-ir="inicio">Concluir</button>
+    </section>
+
+    <!-- 5. PIN da promotora -->
+    <section id="pin" class="tela tela--hero">
+      <h2>Área da promotora</h2>
+      <form id="form-pin" class="cartao cartao--pin">
+        <input id="pin-campo" type="password" inputmode="numeric" maxlength="8" placeholder="PIN" autocomplete="off">
+        <small class="erro" id="pin-erro"></small>
+        <button class="botao" type="submit">Entrar</button>
+        <button class="link" type="button" data-ir="inicio">Cancelar</button>
+      </form>
+    </section>
+
+    <!-- 6. Promotora: lista -->
+    <section id="promotora" class="tela">
+      <header class="topo"><h2>Participantes</h2><button class="link" id="sair-promotora">Sair</button></header>
+      <div class="barra-envio" id="barra-envio"></div>
+      <div class="acoes">
+        <input id="busca" type="search" placeholder="Buscar por nome ou número" autocomplete="off">
+        <button class="botao botao--secundario" id="enviar-agora">Enviar agora</button>
+        <button class="botao botao--secundario" id="exportar-csv">Exportar CSV</button>
+        <button class="botao botao--secundario" data-ir="ranking">Ranking</button>
+      </div>
+      <ul class="lista" id="lista-participantes"></ul>
+    </section>
+
+    <!-- 7. Promotora: tempo -->
+    <section id="tempo" class="tela tela--hero">
+      <h2>Tempo de <span id="tempo-nome"></span></h2>
+      <p class="hero-sub">Participante nº <strong id="tempo-numero"></strong></p>
+      <form id="form-tempo" class="cartao cartao--tempo">
+        <div class="relogio">
+          <input id="tempo-min" inputmode="numeric" maxlength="2" placeholder="0" aria-label="Minutos">
+          <span>:</span>
+          <input id="tempo-seg" inputmode="numeric" maxlength="2" placeholder="00" aria-label="Segundos">
+        </div>
+        <small class="erro" id="tempo-erro"></small>
+        <button class="botao" type="submit">Salvar tempo</button>
+        <button class="link" type="button" data-ir="promotora">Cancelar</button>
+      </form>
+    </section>
+
+    <!-- 8. Resultado -->
+    <section id="resultado" class="tela tela--hero">
+      <p class="resultado-emoji" id="resultado-emoji"></p>
+      <h1 class="resultado-titulo" id="resultado-titulo"></h1>
+      <p class="hero-sub" id="resultado-texto"></p>
+      <p class="numero-grande" id="resultado-tempo"></p>
+      <button class="botao" data-ir="promotora">Voltar à lista</button>
+    </section>
+
+    <!-- 9. Ranking -->
+    <section id="ranking" class="tela">
+      <header class="topo"><button class="voltar" id="ranking-voltar" aria-label="Voltar">‹</button><h2>Ranking</h2><span></span></header>
+      <ol class="lista lista--ranking" id="lista-ranking"></ol>
+    </section>
+  </main>
+</body>
+</html>

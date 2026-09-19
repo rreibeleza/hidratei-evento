@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "rros": {
+      "command": "rros-mcp"
+    }
+  }
+}
