@@ -61,7 +61,8 @@ export function ranking(participantes) {
   return participantes
     .filter((p) => p.tempoSeg != null)
     .sort((a, b) => a.tempoSeg - b.tempoSeg || a.tempoEm.localeCompare(b.tempoEm))
-    .map((p, i) => ({ ...p, posicao: i + 1 }));
+    // tempo igual = mesma posição (1, 1, 3): a promotora vê o empate em vez de o app decidir por quem registrou antes
+    .map((p, i, lista) => ({ ...p, posicao: lista.findIndex((q) => q.tempoSeg === p.tempoSeg) + 1 }));
 }
 
 export function nomePublico(nome) {

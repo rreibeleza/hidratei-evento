@@ -83,14 +83,14 @@ test('resultado: brinde só abaixo de 6:00 — exatamente 6:00 é desculpa', () 
   assert.equal(resultado(null), null);
 });
 
-test('ranking: só quem tem tempo, do mais rápido ao mais lento, empate pela ordem de chegada do tempo', () => {
+test('ranking: só quem tem tempo, do mais rápido ao mais lento; tempo igual divide a posição (empate visível)', () => {
   const r = ranking([
     { id: 'a', tempoSeg: 400, tempoEm: '2026-09-24T10:00:00Z' },
     { id: 'b', tempoSeg: null },
     { id: 'c', tempoSeg: 300, tempoEm: '2026-09-24T10:05:00Z' },
     { id: 'd', tempoSeg: 300, tempoEm: '2026-09-24T10:01:00Z' },
   ]);
-  assert.deepEqual(r.map((p) => [p.posicao, p.id]), [[1, 'd'], [2, 'c'], [3, 'a']]);
+  assert.deepEqual(r.map((p) => [p.posicao, p.id]), [[1, 'd'], [1, 'c'], [3, 'a']]);
 });
 
 test('nome público: primeiro nome + inicial do último sobrenome', () => {

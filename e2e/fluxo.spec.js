@@ -192,3 +192,23 @@ test('offline: o app abre sem internet e o cadastro sobrevive a recarregar', asy
   await entrarPromotora(page);
   await expect(page.locator('#lista-participantes li', { hasText: 'Ana Souza' })).toBeVisible();
 });
+
+test.describe('html', () => {
+  test.use({ serviceWorkers: 'block' });
+  test('envio: planilha que responde página de erro (HTML) vira mensagem legível, e o registro segue guardado', async ({ page }) => {
+  await page.route('**/config.js', (r) => r.fulfill({
+    contentType: 'application/javascript',
+    body: "export const CONFIG = { evento: 'x', planilhaUrl: 'https://planilha.teste/exec', token: 'tk', pinPromotora: '2424' };",
+  }));
+  await page.route('https://planilha.teste/**', (r) => r.fulfill({
+    contentType: 'text/html', headers: { 'access-control-allow-origin': '*' }, body: '<html><body>Erro do Google</body></html>',
+  }));
+  await page.goto('/');
+  await cadastrar(page);
+  await lerAceitarAssinar(page);
+  await page.getByRole('button', { name: 'Concluir' }).click();
+  await entrarPromotora(page);
+  await page.getByRole('button', { name: 'Enviar agora' }).click();
+  await expect(page.locator('#barra-envio')).toContainText('1 registro(s) aguardando envio à planilha — resposta inesperada da planilha');
+});
+});

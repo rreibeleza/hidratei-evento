@@ -368,7 +368,11 @@ async function enviarPendentes() {
     }
   } catch (e) {
     // fetch que nem chega na planilha (DNS, Wi-Fi sem saída) vira TypeError com texto técnico em inglês
-    ultimoErro = !navigator.onLine ? 'sem internet' : e instanceof TypeError ? 'sem conexão com a planilha' : e.message;
+    // e resposta que não é JSON (página de erro do Google) vira SyntaxError — também ilegível para a promotora
+    ultimoErro = !navigator.onLine ? 'sem internet'
+      : e instanceof TypeError ? 'sem conexão com a planilha'
+      : e instanceof SyntaxError ? 'resposta inesperada da planilha'
+      : e.message;
   } finally {
     enviando = false;
     if (telaAtual === 'promotora') renderBarraEnvio(await listar());
