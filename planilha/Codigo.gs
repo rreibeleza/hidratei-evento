@@ -52,13 +52,27 @@ function doGet() {
 function autorizar() {
   abaParticipantes();
   pastaAssinaturas();
+  Logger.log('Planilha: ' + planilha().getUrl());
+}
+
+// Funciona dos dois jeitos: script criado DENTRO da planilha (Extensões → Apps Script) usa ela; script avulso
+// (script.google.com) cria a planilha na primeira execução e guarda o id.
+function planilha() {
+  const ativa = SpreadsheetApp.getActiveSpreadsheet();
+  if (ativa) return ativa;
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('PLANILHA_ID');
+  if (id) return SpreadsheetApp.openById(id);
+  const nova = SpreadsheetApp.create('Desafio 1 km Hidratei — participantes');
+  props.setProperty('PLANILHA_ID', nova.getId());
+  return nova;
 }
 
 function abaParticipantes() {
-  const planilha = SpreadsheetApp.getActiveSpreadsheet();
-  let aba = planilha.getSheetByName(ABA);
+  const p = planilha();
+  let aba = p.getSheetByName(ABA);
   if (!aba) {
-    aba = planilha.insertSheet(ABA);
+    aba = p.insertSheet(ABA);
     aba.appendRow(COLUNAS);
     aba.setFrozenRows(1);
     aba.getRange(1, 1, 1, COLUNAS.length).setFontWeight('bold');
