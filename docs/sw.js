@@ -1,6 +1,6 @@
 // Deixa o app abrir e funcionar sem internet. Mudou QUALQUER arquivo (termo, config, tela)? Suba VERSAO —
 // é assim que o tablet percebe a versão nova (ela entra quando o app voltar à tela inicial).
-const VERSAO = 'v2';
+const VERSAO = 'v3';
 const ARQUIVOS = [
   './', 'index.html', 'estilo.css', 'app.js', 'logica.js', 'banco.js', 'config.js', 'termo.js',
   'logo.svg', 'icone-192.png', 'icone-512.png', 'manifest.webmanifest',
