@@ -2,7 +2,8 @@
 
 PWA offline do evento de 24/09/2026: o participante preenche os dados, lê e assina o termo; a promotora
 (PIN) registra o tempo do 1 km — abaixo de 6:00 ganha brinde. Tudo fica salvo no tablet (IndexedDB) e sobe
-para uma Google Sheet quando há internet. Plano B: **Exportar CSV** na área da promotora.
+para uma Google Sheet quando há internet. Plano B: **Exportar CSV** na área da promotora. O botão **Termo** de
+cada participante gera ali mesmo, sem internet, o PDF do termo assinado (dados, texto, data/hora e assinatura).
 
 - `docs/` — o site (GitHub Pages publica esta pasta). Sem build.
 - `docs/termo.js` — **o texto do termo** (único lugar). `docs/config.js` — URL da planilha, token, PIN.

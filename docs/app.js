@@ -4,7 +4,9 @@ import { listar, atualizar, inserir } from './banco.js';
 import {
   validarCadastro, dataBRparaISO, parseTempo, formatTempo, resultado, ranking,
   nomePublico, nomeProprio, paraCSV, pendentes, payloadEnvio, confirmarEnvio,
+  documentoTermo, nomeArquivoTermo,
 } from './logica.js';
+import { gerarPDFTermo } from './termo-pdf.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -281,9 +283,32 @@ async function renderLista() {
     li.addEventListener('click', () => abrirTempo(p));
     const nome = el('span', 'nome', p.nome);
     nome.append(el('small', null, `Assinou às ${new Date(p.aceitoEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`));
-    li.append(el('span', 'num', num3(p.numero)), nome, tagResultado(p));
+    li.append(el('span', 'num', num3(p.numero)), nome, tagResultado(p), botaoTermo(p));
     return li;
   }));
+}
+
+function botaoTermo(p) {
+  const b = el('button', 'botao botao--secundario botao--termo', 'Termo');
+  b.type = 'button';
+  b.setAttribute('aria-label', `Baixar termo de ${p.nome}`);
+  b.addEventListener('click', async (e) => {
+    e.stopPropagation(); // a linha inteira abre a tela de tempo; o botão não
+    b.disabled = true;
+    // Aviso próprio, fora da barra de envio: aquela é redesenhada a cada busca e a cada envio, e apagaria o recado.
+    const aviso = $('#termo-erro');
+    aviso.hidden = true;
+    try {
+      const pdf = await gerarPDFTermo(documentoTermo(p, TERMO), p.assinatura);
+      await entregarArquivo(new File([pdf], nomeArquivoTermo(p), { type: 'application/pdf' }));
+    } catch (erro) {
+      aviso.textContent = `Não foi possível gerar o termo de ${p.nome} (nº ${num3(p.numero)}): ${erro.message}. Os dados dele seguem no "Exportar CSV".`;
+      aviso.hidden = false;
+    } finally {
+      b.disabled = false;
+    }
+  });
+  return b;
 }
 
 function abrirTempo(p) {
@@ -403,10 +428,7 @@ $('#enviar-agora').addEventListener('click', async () => {
   renderBarraEnvio(await listar());
 });
 
-$('#exportar-csv').addEventListener('click', async () => {
-  const lista = (await listar()).sort((a, b) => a.numero - b.numero);
-  const carimbo = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
-  const arquivo = new File([paraCSV(lista)], `hidratei-1km-${carimbo}.csv`, { type: 'text/csv' });
+async function entregarArquivo(arquivo) {
   // No tablet, compartilhar (WhatsApp, e-mail, Drive) é mais útil que baixar.
   if (navigator.canShare?.({ files: [arquivo] })) {
     try { await navigator.share({ files: [arquivo], title: arquivo.name }); return; } catch { /* cancelado: cai no download */ }
@@ -416,6 +438,12 @@ $('#exportar-csv').addEventListener('click', async () => {
   a.download = arquivo.name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 10e3);
+}
+
+$('#exportar-csv').addEventListener('click', async () => {
+  const lista = (await listar()).sort((a, b) => a.numero - b.numero);
+  const carimbo = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+  await entregarArquivo(new File([paraCSV(lista)], `hidratei-1km-${carimbo}.csv`, { type: 'text/csv' }));
 });
 
 // ---------- tablet ----------

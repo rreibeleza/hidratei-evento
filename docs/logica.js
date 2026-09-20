@@ -130,3 +130,84 @@ const PARTICULAS = new Set(['de', 'da', 'do', 'das', 'dos', 'e']);
 export const nomeProprio = (nome) => nome.trim().toLowerCase().split(/\s+/)
   .map((p, i) => (i > 0 && PARTICULAS.has(p) ? p : p.replace(/(^|-)(\p{L})/gu, (_, h, l) => h + l.toUpperCase())))
   .join(' ');
+
+// Termo assinado para baixar. Cada registro guarda a VERSÃO que a pessoa aceitou, não o texto: se o texto do
+// aparelho já é de outra versão, o documento diz isso em vez de imprimir o texto atual como se fosse o assinado.
+export function documentoTermo(p, termo) {
+  const textoDisponivel = p.termoVersao === termo.versao;
+  const [a, m, d] = p.nascimento.split('-');
+  return {
+    titulo: termo.titulo,
+    rascunho: textoDisponivel && !!termo.rascunho,
+    identificacao: [
+      ['Participante nº', String(p.numero).padStart(3, '0')],
+      ['Nome', p.nome],
+      ['CPF', p.cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')],
+      ['Nascimento', `${d}/${m}/${a}`],
+      ['Celular', p.celular.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3')],
+      ...(p.email ? [['E-mail', p.email]] : []),
+    ],
+    paragrafos: textoDisponivel
+      ? termo.texto.split(/\n\s*\n/).map((t) => t.trim())
+      : [`Este participante assinou a versão "${p.termoVersao}" do termo. O texto guardado neste aparelho já é o da versão "${termo.versao}", por isso não é reproduzido aqui: consulte o texto arquivado da versão "${p.termoVersao}".`],
+    aceite: `Li e concordo com o termo acima. Aceito e assinado em ${new Date(p.aceitoEm).toLocaleString('pt-BR')}.`,
+    rodape: `Versão do termo: ${p.termoVersao} · Registro: ${p.id}`,
+  };
+}
+
+export const nomeArquivoTermo = (p) =>
+  `termo-${String(p.numero).padStart(3, '0')}-${p.nome.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}.pdf`;
+
+// PDF mínimo: uma imagem JPEG por folha A4 (o navegador já entrega o JPEG do canvas; o PDF o embute como está).
+export function montarPDF(paginas) {
+  const enc = new TextEncoder();
+  const partes = [];
+  const posicoes = [];
+  let tamanho = 0;
+  const por = (dado) => { const b = typeof dado === 'string' ? enc.encode(dado) : dado; partes.push(b); tamanho += b.length; };
+  const objeto = (n, corpo, stream) => {
+    posicoes[n] = tamanho;
+    por(`${n} 0 obj\n${corpo}\n`);
+    if (stream) { por('stream\n'); por(stream); por('\nendstream\n'); }
+    por('endobj\n');
+  };
+  por('%PDF-1.4\n');
+  const filhos = paginas.map((_, i) => `${3 + i * 3} 0 R`).join(' ');
+  objeto(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  objeto(2, `<< /Type /Pages /Kids [${filhos}] /Count ${paginas.length} >>`);
+  paginas.forEach(({ jpeg, largura, altura }, i) => {
+    const n = 3 + i * 3;
+    const conteudo = enc.encode('q 595 0 0 842 0 0 cm /Im0 Do Q');
+    objeto(n, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents ${n + 1} 0 R /Resources << /XObject << /Im0 ${n + 2} 0 R >> >> >>`);
+    objeto(n + 1, `<< /Length ${conteudo.length} >>`, conteudo);
+    objeto(n + 2, `<< /Type /XObject /Subtype /Image /Width ${largura} /Height ${altura} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>`, jpeg);
+  });
+  const total = 2 + paginas.length * 3;
+  const inicioXref = tamanho;
+  por(`xref\n0 ${total + 1}\n0000000000 65535 f \n`);
+  for (let n = 1; n <= total; n++) por(`${String(posicoes[n]).padStart(10, '0')} 00000 n \n`);
+  por(`trailer\n<< /Size ${total + 1} /Root 1 0 R >>\nstartxref\n${inicioXref}\n%%EOF\n`);
+  const pdf = new Uint8Array(tamanho);
+  let pos = 0;
+  for (const b of partes) { pdf.set(b, pos); pos += b.length; }
+  return pdf;
+}
+
+// Quebra de linha para a folha do termo. `medir` devolve a largura do texto (no app, a do canvas).
+// Palavra sozinha mais larga que a coluna — e-mail comprido — é partida por caractere em vez de vazar da folha.
+export function quebrarLinhas(texto, largura, medir) {
+  const linhas = [];
+  let atual = '';
+  for (let palavra of texto.split(/\s+/).filter(Boolean)) {
+    while (medir(palavra) > largura) {
+      let n = palavra.length - 1;
+      while (n > 1 && medir(palavra.slice(0, n)) > largura) n--;
+      if (atual) { linhas.push(atual); atual = ''; }
+      linhas.push(palavra.slice(0, n));
+      palavra = palavra.slice(n);
+    }
+    const tentativa = atual ? `${atual} ${palavra}` : palavra;
+    if (atual && medir(tentativa) > largura) { linhas.push(atual); atual = palavra; } else atual = tentativa;
+  }
+  return atual ? [...linhas, atual] : linhas;
+}

@@ -136,6 +136,135 @@ test.describe('sem service worker', () => {
     expect(csv).toContain('1;Ana Souza;52998224725;1995-03-10;31998765432;;rascunho-1;');
   });
 
+  test('baixar o termo assinado: PDF por participante, sem abrir a tela de tempo', async ({ page }) => {
+    await page.addInitScript(() => { navigator.canShare = () => false; });
+    await page.goto('/');
+    await cadastrar(page);
+    await lerAceitarAssinar(page);
+    await page.getByRole('button', { name: 'Concluir' }).click();
+    await entrarPromotora(page);
+    const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Baixar termo de Ana Souza', exact: true }).click(); // a linha também é botão e engloba este nome
+    const arq = await download;
+    expect(arq.suggestedFilename()).toBe('termo-001-ana-souza.pdf');
+    await expect(page.locator('#promotora')).toBeVisible(); // o toque no botão não é um toque na linha
+    const fs = await import('node:fs/promises');
+    await fs.mkdir(TELAS, { recursive: true });
+    await arq.saveAs(`${TELAS}/termo-001-ana-souza.pdf`);
+    const pdf = await fs.readFile(`${TELAS}/termo-001-ana-souza.pdf`, 'latin1');
+    expect(pdf.startsWith('%PDF-1.4')).toBe(true);
+    expect(pdf).toMatch(/\/Count 1\b/); // o rascunho atual cabe numa folha
+    expect(Number(/\/Filter \/DCTDecode \/Length (\d+)/.exec(pdf)[1])).toBeGreaterThan(30_000); // folha desenhada, não em branco
+  });
+
+  test('termo baixado: identificação, aceite e assinatura estão no papel; e-mail longo não vaza da folha', async ({ page }) => {
+    await page.addInitScript(() => { navigator.canShare = () => false; });
+    await page.goto('/');
+    await cadastrar(page);
+    await lerAceitarAssinar(page);
+    await page.getByRole('button', { name: 'Concluir' }).click();
+    await entrarPromotora(page);
+    const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Baixar termo de Ana Souza', exact: true }).click();
+    const fs = await import('node:fs/promises');
+    const pdf = await fs.readFile(await (await download).path(), 'latin1');
+    const jpeg = /\/Filter \/DCTDecode \/Length \d+ >>\nstream\n([\s\S]*?)\nendstream/.exec(pdf)[1];
+
+    // Pixels da folha BAIXADA contra a mesma folha redesenhada com uma coisa só trocada: se o desenho pular a
+    // assinatura, a identificação ou o aceite, a variante sai idêntica à original e a diferença dá zero.
+    const m = await page.evaluate(async (jpegB64) => {
+      const [{ desenharTermo }, { documentoTermo }, { TERMO }, { listar }] = await Promise.all(
+        ['./termo-pdf.js', './logica.js', './termo.js', './banco.js'].map((a) => import(a)));
+      const [p] = await listar();
+      const doc = documentoTermo(p, TERMO);
+      const pixels = (c) => c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      const emCanvas = (img, w = img.width, h = img.height) => {
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const g = c.getContext('2d');
+        g.fillStyle = '#fff';
+        g.fillRect(0, 0, w, h);
+        if (img) g.drawImage(img, 0, 0);
+        return c;
+      };
+      const bytes = Uint8Array.from(atob(jpegB64), (ch) => ch.charCodeAt(0));
+      const baixada = pixels(emCanvas(await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }))));
+      const ass = await createImageBitmap(await (await fetch(p.assinatura)).blob());
+      const emBranco = emCanvas(null, ass.width, ass.height).toDataURL('image/png');
+      const diferenca = async (d, assinatura) => {
+        const folha = pixels((await desenharTermo(d, assinatura))[0]);
+        let n = 0;
+        for (let i = 1; i < folha.length; i += 4) if (Math.abs(folha[i] - baixada[i]) > 80) n++;
+        return n;
+      };
+      const trocar = (rotulo, valor) => ({ ...doc, identificacao: doc.identificacao.map(([r, v]) => (r === rotulo ? [r, valor] : [r, v])) });
+      const [comEmail] = await desenharTermo(
+        { ...doc, identificacao: [...doc.identificacao, ['E-mail', 'maria.eduarda.albuquerque.nascimento@estudante.universidadefederaldeminasgerais.edu.br']] }, p.assinatura);
+      const px = pixels(comEmail);
+      let tintaForaDaMargem = 0;
+      for (let y = 0; y < comEmail.height; y++) for (let x = 1131; x < comEmail.width; x++) if (px[(y * comEmail.width + x) * 4 + 1] < 200) tintaForaDaMargem++;
+      return {
+        igual: await diferenca(doc, p.assinatura),
+        semAssinatura: await diferenca(doc, emBranco),
+        outroNascimento: await diferenca(trocar('Nascimento', '00/00/0000'), p.assinatura),
+        outroAceite: await diferenca({ ...doc, aceite: 'Xxxxxxx xx xxxxxxx xxxxxxx.' }, p.assinatura),
+        tintaForaDaMargem,
+      };
+    }, Buffer.from(jpeg, 'latin1').toString('base64'));
+    // Medido em 20/09: igual 0 · sem assinatura 2392 · outro nascimento 1246 · outro aceite 6438.
+    expect(m.igual).toBeLessThan(50); // a folha baixada É a deste participante (só ruído de JPEG)
+    expect(m.semAssinatura).toBeGreaterThan(500);
+    expect(m.outroNascimento).toBeGreaterThan(300);
+    expect(m.outroAceite).toBeGreaterThan(500);
+    expect(m.tintaForaDaMargem).toBe(0);
+  });
+
+  test('termo que não gera: o aviso diz que é a assinatura e não some quando a lista se redesenha', async ({ page }) => {
+    await page.goto('/');
+    await cadastrar(page);
+    await lerAceitarAssinar(page);
+    await page.getByRole('button', { name: 'Concluir' }).click();
+    await page.evaluate(async () => {
+      const { listar, atualizar } = await import('./banco.js');
+      const [p] = await listar();
+      await atualizar(p.id, (x) => ({ ...x, assinatura: 'data:image/png;base64,QUJD' })); // bytes que não são imagem
+    });
+    await entrarPromotora(page);
+    await page.getByRole('button', { name: 'Baixar termo de Ana Souza', exact: true }).click();
+    const aviso = page.locator('#termo-erro');
+    await expect(aviso).toContainText('Ana Souza');
+    await expect(aviso).toContainText('assinatura');
+    await expect(page.locator('#barra-envio')).toContainText('Planilha não configurada'); // a barra de envio segue falando de envio
+    await page.locator('#busca').fill('ana'); // redesenha a lista e a barra
+    await expect(page.locator('#lista-participantes li')).toHaveCount(1);
+    await expect(aviso).toBeVisible();
+    await expect(aviso).toContainText('assinatura');
+  });
+
+  test('baixar o termo: texto longo (como o da advogada) vira mais de uma folha', async ({ page }) => {
+    const clausula = 'Declaro estar ciente e de acordo com todas as condições desta atividade, assumindo os riscos inerentes à prática esportiva. '.repeat(4);
+    const texto = Array.from({ length: 22 }, (_, i) => `${i + 1}. ${clausula}`).join('\n\n');
+    await page.route('**/termo.js', (r) => r.fulfill({
+      contentType: 'text/javascript',
+      body: `export const TERMO = ${JSON.stringify({ versao: 'longo-1', rascunho: false, titulo: 'Termo de Ciência e Responsabilidade', texto })};`,
+    }));
+    await page.addInitScript(() => { navigator.canShare = () => false; });
+    await page.goto('/');
+    await cadastrar(page);
+    await lerAceitarAssinar(page);
+    await page.getByRole('button', { name: 'Concluir' }).click();
+    await entrarPromotora(page);
+    const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Baixar termo de Ana Souza', exact: true }).click();
+    const fs = await import('node:fs/promises');
+    await fs.mkdir(TELAS, { recursive: true });
+    await (await download).saveAs(`${TELAS}/termo-longo.pdf`);
+    const pdf = await fs.readFile(`${TELAS}/termo-longo.pdf`, 'latin1');
+    const folhas = Number(/\/Count (\d+)/.exec(pdf)[1]);
+    expect(folhas).toBeGreaterThan(1);
+    expect(pdf.match(/\/Filter \/DCTDecode/g)).toHaveLength(folhas);
+  });
+
   test('envio: 1ª ida leva a assinatura; o tempo vai depois sem reenviar a imagem; sem rede fica guardado', async ({ page }) => {
     await page.route('**/config.js', (r) => r.fulfill({
       contentType: 'application/javascript',
