@@ -133,7 +133,7 @@ test.describe('sem service worker', () => {
     const fs = await import('node:fs/promises');
     const csv = await fs.readFile(await arq.path(), 'utf8');
     expect(csv).toContain('numero;nome;cpf');
-    expect(csv).toContain('1;Ana Souza;52998224725;1995-03-10;31998765432;;rascunho-1;');
+    expect(csv).toContain('1;Ana Souza;529.982.247-25;1995-03-10;(31) 99876-5432;;rascunho-1;');
   });
 
   test('baixar o termo assinado: PDF por participante, sem abrir a tela de tempo', async ({ page }) => {

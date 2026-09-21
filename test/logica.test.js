@@ -112,3 +112,12 @@ test('csv: separador ; com BOM, aspas escapadas e sem a imagem da assinatura', (
   assert.ok(linha.includes(';5:32;'));
   assert.ok(linha.includes(';brinde;'));
 });
+
+test('csv: CPF e celular saem com máscara — o Excel não come o zero à esquerda', () => {
+  const csv = paraCSV([{
+    numero: 2, nome: 'Bia Lima', cpf: '01234567890', nascimento: '1990-01-01',
+    celular: '31998765432', email: '', termoVersao: 'v1', aceitoEm: '2026-09-24T10:00:00Z',
+  }]);
+  assert.ok(csv.includes(';012.345.678-90;'));
+  assert.ok(csv.includes(';(31) 99876-5432;'));
+});

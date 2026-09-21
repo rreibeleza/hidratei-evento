@@ -72,12 +72,16 @@ export function nomePublico(nome) {
   return cap(partes[0]) + ultimo;
 }
 
+const mascaraCPF = (cpf) => cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+const mascaraCelular = (cel) => cel.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
+
+// CPF e celular vão com máscara: só dígitos, o Excel abre como número e come o zero à esquerda do CPF.
 const COLUNAS_CSV = [
   ['numero', (p) => p.numero],
   ['nome', (p) => p.nome],
-  ['cpf', (p) => p.cpf],
+  ['cpf', (p) => mascaraCPF(p.cpf)],
   ['nascimento', (p) => p.nascimento],
-  ['celular', (p) => p.celular],
+  ['celular', (p) => mascaraCelular(p.celular)],
   ['email', (p) => p.email],
   ['termo_versao', (p) => p.termoVersao],
   ['aceito_em', (p) => p.aceitoEm],
@@ -142,9 +146,9 @@ export function documentoTermo(p, termo) {
     identificacao: [
       ['Participante nº', String(p.numero).padStart(3, '0')],
       ['Nome', p.nome],
-      ['CPF', p.cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')],
+      ['CPF', mascaraCPF(p.cpf)],
       ['Nascimento', `${d}/${m}/${a}`],
-      ['Celular', p.celular.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3')],
+      ['Celular', mascaraCelular(p.celular)],
       ...(p.email ? [['E-mail', p.email]] : []),
     ],
     paragrafos: textoDisponivel
