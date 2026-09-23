@@ -9,6 +9,9 @@ export default defineConfig({
     browserName: 'chromium',
     locale: 'pt-BR',
     timezoneId: 'America/Sao_Paulo',
+    // câmera falsa do Chromium (quadro verde animado, 640x480) já liberada — no tablet a permissão é pedida uma vez
+    permissions: ['camera'],
+    launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] },
   },
   webServer: {
     command: 'python3 -m http.server 4173 --directory docs',

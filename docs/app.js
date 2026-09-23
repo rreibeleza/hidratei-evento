@@ -4,7 +4,7 @@ import { listar, atualizar, inserir } from './banco.js';
 import {
   validarCadastro, dataBRparaISO, parseTempo, formatTempo, resultado, ranking,
   nomePublico, nomeProprio, paraCSV, pendentes, payloadEnvio, confirmarEnvio,
-  documentoTermo, nomeArquivoTermo,
+  documentoTermo, nomeArquivoTermo, paragrafosTermo,
 } from './logica.js';
 import { gerarPDFTermo } from './termo-pdf.js';
 
@@ -34,6 +34,7 @@ const aoEntrar = {
     cadastro = null;
     $('#form-cadastro').reset();
     limparErros();
+    buscarVersaoNova();
     if (recarregarNoInicio) location.reload();
   },
   termo: renderTermo,
@@ -43,6 +44,7 @@ const aoEntrar = {
 };
 
 function ir(tela) {
+  fecharCamera(); // trocar de tela (inclusive por inatividade) nunca deixa a câmera ligada
   if (TELAS_PROMOTORA.includes(tela) && !promotoraLogada) tela = 'pin';
   if (tela === 'termo' && !cadastro) tela = 'cadastro';
   $$('.tela').forEach((t) => t.classList.toggle('ativa', t.id === tela));
@@ -128,12 +130,12 @@ const botaoConfirmar = $('#termo-confirmar');
 const dica = $('#termo-dica');
 
 function renderTermo() {
-  $('#termo-titulo').textContent = TERMO.titulo;
   $('#termo-rascunho').hidden = !TERMO.rascunho;
   const cpf = MASCARAS.cpf(cadastro.cpf);
   textoTermo.replaceChildren(
+    el('p', 'titulo-termo', TERMO.titulo), // título longo: dentro do texto, não no cabeçalho
     el('p', 'declarante', `Participante: ${cadastro.nome} — CPF ${cpf}`),
-    ...TERMO.texto.split(/\n\s*\n/).map((t) => el('p', null, t.trim())),
+    ...paragrafosTermo(TERMO.texto).map((p) => el(p.titulo ? 'h3' : 'p', null, p.texto)),
   );
   textoTermo.scrollTop = 0;
   aceite.checked = false;
@@ -141,6 +143,10 @@ function renderTermo() {
   dica.textContent = 'Role até o fim do texto para continuar.';
   dica.classList.remove('ok');
   assinatura.limpar();
+  definirFoto(null);
+  // Cada participante tenta de novo a câmera do app: a falha de um não manda o resto do dia para a câmera do tablet
+  // (com a permissão bloqueada de vez, a recusa é imediata e a câmera do tablet abre no mesmo toque).
+  cameraDoSistema = !navigator.mediaDevices?.getUserMedia;
   verificarLeitura();
 }
 
@@ -153,7 +159,7 @@ function verificarLeitura() {
 textoTermo.addEventListener('scroll', verificarLeitura);
 
 const atualizarBotaoConfirmar = () => {
-  botaoConfirmar.disabled = !(aceite.checked && !assinatura.vazia());
+  botaoConfirmar.disabled = !(aceite.checked && !assinatura.vazia() && foto);
 };
 aceite.addEventListener('change', atualizarBotaoConfirmar);
 
@@ -221,6 +227,82 @@ function criarAssinatura(canvas, aoMudar) {
 const assinatura = criarAssinatura($('#assinatura-canvas'), () => atualizarBotaoConfirmar());
 $('#assinatura-limpar').addEventListener('click', () => assinatura.limpar());
 
+// ---------- foto (junto com a assinatura) ----------
+// Câmera dentro do app: frontal, prévia grande, sem sair da tela. Se ela não abrir (permissão negada, câmera ocupada),
+// o botão passa a abrir a câmera do próprio tablet — a foto chega como arquivo e segue o mesmo caminho.
+const camera = $('#camera');
+const video = $('#camera-video');
+const disparar = $('#camera-disparar');
+let foto = null; // JPEG (data URL) de quem está assinando
+let cameraDoSistema = !navigator.mediaDevices?.getUserMedia;
+
+function definirFoto(dataURL) {
+  foto = dataURL;
+  $('#foto-miniatura').hidden = !foto;
+  $('#foto-miniatura').src = foto ?? '';
+  $('#foto-abrir').textContent = foto ? 'Tirar outra' : 'Abrir câmera';
+  $('#foto-status').textContent = foto ? 'Foto tirada.' : 'Tire uma foto para identificar quem assinou.';
+  atualizarBotaoConfirmar();
+}
+
+// JPEG de no máximo 640 px no lado maior: reconhece o rosto e fica leve no tablet e no PDF.
+function reduzir(imagem, largura, altura) {
+  const escala = Math.min(1, 640 / Math.max(largura, altura));
+  const c = document.createElement('canvas');
+  c.width = Math.round(largura * escala);
+  c.height = Math.round(altura * escala);
+  c.getContext('2d').drawImage(imagem, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.85);
+}
+
+function fecharCamera() {
+  video.srcObject?.getTracks().forEach((t) => t.stop());
+  video.srcObject = null;
+  disparar.disabled = true;
+  if (camera.open) camera.close();
+}
+camera.addEventListener('close', fecharCamera); // Esc e o "voltar" do Android também desligam a câmera
+video.addEventListener('playing', () => { disparar.disabled = false; }); // só dispara com imagem na tela
+$('#camera-cancelar').addEventListener('click', fecharCamera);
+disparar.addEventListener('click', () => {
+  definirFoto(reduzir(video, video.videoWidth, video.videoHeight));
+  fecharCamera();
+});
+
+$('#foto-abrir').addEventListener('click', async (e) => {
+  if (cameraDoSistema) return $('#foto-arquivo').click();
+  const botao = e.currentTarget;
+  botao.disabled = true; // toque duplo abriria duas câmeras, e a primeira ficaria ligada sem ninguém para desligar
+  try {
+    const fluxo = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+    if (telaAtual !== 'termo') return fluxo.getTracks().forEach((t) => t.stop()); // a tela mudou enquanto pedia permissão
+    video.srcObject = fluxo;
+    camera.showModal();
+  } catch {
+    cameraDoSistema = true;
+    $('#foto-status').textContent = 'Se a câmera do tablet não abrir, toque de novo no botão.';
+    $('#foto-arquivo').click(); // abre na hora se o toque ainda valer; senão, no próximo toque
+  } finally {
+    botao.disabled = false;
+  }
+});
+
+$('#foto-arquivo').addEventListener('change', async (e) => {
+  const arquivo = e.target.files[0];
+  e.target.value = ''; // escolher a mesma foto de novo também dispara
+  if (!arquivo) return;
+  const img = new Image();
+  img.src = URL.createObjectURL(arquivo);
+  try {
+    await img.decode();
+    definirFoto(reduzir(img, img.naturalWidth, img.naturalHeight));
+  } catch {
+    $('#foto-status').textContent = 'Não deu para ler a foto. Tente de novo.';
+  } finally {
+    URL.revokeObjectURL(img.src);
+  }
+});
+
 botaoConfirmar.addEventListener('click', async () => {
   botaoConfirmar.disabled = true; // evita duplo toque gravar duas vezes
   const lista = await listar();
@@ -231,6 +313,7 @@ botaoConfirmar.addEventListener('click', async () => {
     termoVersao: TERMO.versao,
     aceitoEm: new Date().toISOString(),
     assinatura: assinatura.png(),
+    foto,
     tempoSeg: null,
     tempoEm: null,
     dispositivo: navigator.userAgent,
@@ -299,7 +382,7 @@ function botaoTermo(p) {
     const aviso = $('#termo-erro');
     aviso.hidden = true;
     try {
-      const pdf = await gerarPDFTermo(documentoTermo(p, TERMO), p.assinatura);
+      const pdf = await gerarPDFTermo(documentoTermo(p, TERMO), p.assinatura, p.foto);
       await entregarArquivo(new File([pdf], nomeArquivoTermo(p), { type: 'application/pdf' }));
     } catch (erro) {
       aviso.textContent = `Não foi possível gerar o termo de ${p.nome} (nº ${num3(p.numero)}): ${erro.message}. Os dados dele seguem no "Exportar CSV".`;
@@ -349,7 +432,7 @@ function mostrarResultado(p) {
   $('#resultado-emoji').textContent = r === 'brinde' ? '🎁' : '💪';
   $('#resultado-titulo').textContent = r === 'brinde' ? 'BRINDE!' : 'DESCULPA';
   $('#resultado-texto').textContent = r === 'brinde'
-    ? `Parabéns, ${primeiro}! Menos de 6 minutos.`
+    ? `Parabéns, ${primeiro}! 1 km em até 6 minutos.`
     : `Não foi dessa vez, ${primeiro} — valeu o esforço!`;
   $('#resultado-tempo').textContent = formatTempo(p.tempoSeg);
   ir('resultado');
@@ -454,6 +537,13 @@ async function manterTelaAcesa() {
 }
 addEventListener('pointerdown', manterTelaAcesa, { once: true });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') manterTelaAcesa(); });
+
+// Com o app aberto o dia todo, o navegador só procura versão nova quando a página carrega. Pedir a checagem ao voltar ao
+// início e ao reabrir a tela faz a versão publicada chegar sem ninguém fechar o app (sem internet, não faz nada).
+function buscarVersaoNova() {
+  navigator.serviceWorker?.getRegistration().then((r) => r?.update()).catch(() => {});
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && telaAtual === 'inicio') buscarVersaoNova(); });
 
 if ('serviceWorker' in navigator) {
   const tinhaVersao = !!navigator.serviceWorker.controller;

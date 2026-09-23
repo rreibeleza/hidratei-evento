@@ -14,11 +14,13 @@ const imagem = (src, falha) => new Promise((ok, erro) => {
 });
 
 // Devolve as folhas (canvas) já desenhadas — separado do PDF para o teste poder olhar o que foi parar no papel.
-export async function desenharTermo(doc, assinaturaDataURL) {
+export async function desenharTermo(doc, assinaturaDataURL, fotoDataURL) {
   await Promise.all([400, 700, 800].map((peso) => document.fonts.load(fonte(peso, 24))));
-  const [logo, assinatura] = await Promise.all([
+  const [logo, assinatura, foto] = await Promise.all([
     imagem('logo.svg', 'o logo não carregou'),
     imagem(assinaturaDataURL, 'a assinatura guardada neste aparelho não pôde ser lida'),
+    // registro de antes da foto sai sem ela, não com erro
+    fotoDataURL && imagem(fotoDataURL, 'a foto guardada neste aparelho não pôde ser lida'),
   ]);
 
   const folhas = [];
@@ -34,9 +36,9 @@ export async function desenharTermo(doc, assinaturaDataURL) {
     y = MARGEM;
   };
   const caber = (altura) => { if (y + altura > A - MARGEM - 50) novaFolha(); };
-  const escrever = (texto, { f, cor = VERDE, entrelinha, depois = 0, x = MARGEM }) => {
+  const escrever = (texto, { f, cor = VERDE, entrelinha, depois = 0, x = MARGEM, largura = L - MARGEM - x }) => {
     ctx.font = f;
-    for (const linha of quebrarLinhas(texto, L - MARGEM - x, (t) => ctx.measureText(t).width)) {
+    for (const linha of quebrarLinhas(texto, largura, (t) => ctx.measureText(t).width)) {
       caber(entrelinha);
       ctx.font = f; // a folha pode ter virado: contexto novo
       ctx.fillStyle = cor;
@@ -78,20 +80,36 @@ export async function desenharTermo(doc, assinaturaDataURL) {
   ctx.fillRect(MARGEM, y, L - 2 * MARGEM, 3);
   y += 30;
 
-  for (const p of doc.paragrafos) escrever(p, { f: fonte(400, 24), entrelinha: 37, depois: 16 });
+  for (const p of doc.paragrafos) {
+    if (p.titulo) { y += 12; caber(3 * 37); } // título de seção não fica sozinho no pé da folha
+    escrever(p.texto, { f: fonte(p.titulo ? 700 : 400, 24), entrelinha: 37, depois: p.titulo ? 8 : 16 });
+  }
   y += 10;
-  // "Li e concordo", a assinatura, a linha e o nome ficam na MESMA folha: assinatura sozinha numa página não diz o que aceitou.
+  // "Li e concordo", a assinatura, a foto, a linha e o nome ficam na MESMA folha: assinatura sozinha numa página não diz
+  // o que aceitou. A foto (até 420×300) fica à direita da assinatura, alinhada ao topo dela.
   const wAss = Math.min(560, assinatura.width), hAss = wAss * assinatura.height / assinatura.width;
-  caber(2 * 37 + 24 + hAss + 90);
+  const eFoto = foto ? Math.min(420 / foto.width, 300 / foto.height) : 0;
+  const wFoto = foto ? foto.width * eFoto : 0, hFoto = foto ? foto.height * eFoto : 0;
+  caber(2 * 37 + 24 + Math.max(hAss + 90, hFoto + 40));
   escrever(doc.aceite, { f: fonte(700, 24), entrelinha: 37, depois: 24 });
 
+  const topo = y;
   ctx.drawImage(assinatura, MARGEM, y, wAss, hAss);
   y += hAss + 6;
   ctx.fillStyle = VERDE;
   ctx.fillRect(MARGEM, y, wAss, 2);
   y += 12;
   const de = (r) => doc.identificacao.find(([rotulo]) => rotulo === r)[1];
-  escrever(`${de('Nome')} — CPF ${de('CPF')}`, { f: fonte(400, 22), cor: SUAVE, entrelinha: 32 });
+  // nome comprido quebra antes da foto em vez de passar por baixo dela
+  escrever(`${de('Nome')} — CPF ${de('CPF')}`, { f: fonte(400, 22), cor: SUAVE, entrelinha: 32, largura: L - 2 * MARGEM - (foto ? wFoto + 40 : 0) });
+  if (foto) {
+    ctx.drawImage(foto, L - MARGEM - wFoto, topo, wFoto, hFoto);
+    ctx.font = fonte(400, 18);
+    ctx.fillStyle = SUAVE;
+    ctx.textAlign = 'right';
+    ctx.fillText(doc.legendaFoto, L - MARGEM, topo + hFoto + 8);
+    ctx.textAlign = 'left';
+  }
 
   folhas.forEach((c, i) => {
     const g = c.getContext('2d');
@@ -103,8 +121,8 @@ export async function desenharTermo(doc, assinaturaDataURL) {
   return folhas;
 }
 
-export async function gerarPDFTermo(doc, assinaturaDataURL) {
-  const folhas = await desenharTermo(doc, assinaturaDataURL);
+export async function gerarPDFTermo(doc, assinaturaDataURL, fotoDataURL) {
+  const folhas = await desenharTermo(doc, assinaturaDataURL, fotoDataURL);
   const paginas = await Promise.all(folhas.map(async (c) => {
     const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.9));
     return { jpeg: new Uint8Array(await blob.arrayBuffer()), largura: L, altura: A };

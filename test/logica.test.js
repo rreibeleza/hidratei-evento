@@ -77,9 +77,10 @@ test('tempo: formata como m:ss', () => {
   assert.equal(formatTempo(null), '');
 });
 
-test('resultado: brinde só abaixo de 6:00 — exatamente 6:00 é desculpa', () => {
+test('resultado: brinde até 6:00 inclusive — o termo diz "em até 6 (seis) minutos"; 6:01 é desculpa', () => {
   assert.equal(resultado(359), 'brinde');
-  assert.equal(resultado(360), 'desculpa');
+  assert.equal(resultado(360), 'brinde');
+  assert.equal(resultado(361), 'desculpa');
   assert.equal(resultado(null), null);
 });
 

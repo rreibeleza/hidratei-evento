@@ -21,7 +21,7 @@
     <section id="inicio" class="tela tela--hero ativa">
       <div class="marca marca--grande"><img class="logo" src="logo.svg" alt="Hidratei"><span class="marca-sport">Sport</span></div>
       <h1 class="hero-titulo">Desafio <span>1 km</span></h1>
-      <p class="hero-sub">Corra 1 km em menos de <strong>6 minutos</strong> e ganhe um brinde.</p>
+      <p class="hero-sub">Corra 1 km em até <strong>6 minutos</strong> e ganhe um brinde.</p>
       <button class="botao botao--grande" data-ir="cadastro">Quero participar</button>
       <nav class="rodape-inicio">
         <button class="link" data-ir="ranking">Ranking</button>
@@ -63,12 +63,18 @@
 
     <!-- 3. Termo + assinatura -->
     <section id="termo" class="tela">
-      <header class="topo"><button class="voltar" data-ir="cadastro" aria-label="Voltar">‹</button><h2 id="termo-titulo"></h2><span class="passo">2 de 2</span></header>
+      <header class="topo"><button class="voltar" data-ir="cadastro" aria-label="Voltar">‹</button><h2>Termo</h2><span class="passo">2 de 2</span></header>
       <div class="cartao cartao--termo">
         <p id="termo-rascunho" class="selo-rascunho" hidden>RASCUNHO — texto provisório, não usar no evento</p>
         <div id="termo-texto" class="termo-texto" tabindex="0"></div>
         <p id="termo-dica" class="dica">Role até o fim do texto para continuar.</p>
         <label class="aceite"><input type="checkbox" id="termo-aceite" disabled> Li e concordo com o termo acima.</label>
+        <div class="foto">
+          <img id="foto-miniatura" alt="Sua foto" hidden>
+          <p class="foto-texto"><strong>Sua foto</strong><span id="foto-status">Tire uma foto para identificar quem assinou.</span></p>
+          <button class="botao botao--secundario" id="foto-abrir" type="button">Abrir câmera</button>
+          <input type="file" id="foto-arquivo" accept="image/*" capture="user" hidden>
+        </div>
         <div class="assinatura">
           <div class="assinatura-cabecalho"><span>Assine aqui com o dedo</span><button class="link" id="assinatura-limpar" type="button">Limpar</button></div>
           <canvas id="assinatura-canvas" aria-label="Área de assinatura"></canvas>
@@ -76,6 +82,15 @@
         <button class="botao" id="termo-confirmar" disabled>Assinar e confirmar</button>
       </div>
     </section>
+
+    <!-- 3b. Câmera (por cima do termo) -->
+    <dialog id="camera" class="camera" aria-label="Câmera">
+      <video id="camera-video" autoplay playsinline muted></video>
+      <div class="camera-acoes">
+        <button class="link" id="camera-cancelar" type="button">Cancelar</button>
+        <button class="botao botao--grande" id="camera-disparar" type="button" disabled>Tirar foto</button>
+      </div>
+    </dialog>
 
     <!-- 4. Confirmação -->
     <section id="pronto" class="tela tela--hero">

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { documentoTermo, nomeArquivoTermo, montarPDF, quebrarLinhas } from '../docs/logica.js';
+import { documentoTermo, paragrafosTermo, nomeArquivoTermo, montarPDF, quebrarLinhas } from '../docs/logica.js';
 
 const TERMO = { versao: 'v-final', rascunho: false, titulo: 'Termo de Ciência', texto: 'Primeiro parágrafo.\n\nSegundo parágrafo.' };
 const ana = {
@@ -26,7 +26,7 @@ test('documento: e-mail só aparece quando foi informado', () => {
 test('documento: traz o texto do termo em parágrafos, a versão e o registro', () => {
   const doc = documentoTermo(ana, TERMO);
   assert.equal(doc.titulo, 'Termo de Ciência');
-  assert.deepEqual(doc.paragrafos, ['Primeiro parágrafo.', 'Segundo parágrafo.']);
+  assert.deepEqual(doc.paragrafos, [{ texto: 'Primeiro parágrafo.', titulo: false }, { texto: 'Segundo parágrafo.', titulo: false }]);
   assert.match(doc.rodape, /v-final/);
   assert.match(doc.rodape, /abc-123/);
   assert.match(doc.aceite, /Li e concordo/);
@@ -35,9 +35,23 @@ test('documento: traz o texto do termo em parágrafos, a versão e o registro', 
 
 test('documento: assinatura de OUTRA versão não recebe o texto atual como se fosse o assinado', () => {
   const doc = documentoTermo({ ...ana, termoVersao: 'rascunho-1' }, TERMO);
-  assert.equal(doc.paragrafos.join(' ').includes('Primeiro parágrafo'), false);
-  assert.match(doc.paragrafos.join(' '), /rascunho-1/);
+  const texto = doc.paragrafos.map((p) => p.texto).join(' ');
+  assert.equal(texto.includes('Primeiro parágrafo'), false);
+  assert.match(texto, /rascunho-1/);
   assert.match(doc.rodape, /rascunho-1/);
+});
+
+test('termo: parágrafo que começa com "# " é título de seção e perde o marcador; "#" no meio do texto não', () => {
+  assert.deepEqual(paragrafosTermo('# 1. Da participação\n\nDeclaro que participo.\n\nItem #2 da lista.'), [
+    { texto: '1. Da participação', titulo: true },
+    { texto: 'Declaro que participo.', titulo: false },
+    { texto: 'Item #2 da lista.', titulo: false },
+  ]);
+});
+
+test('documento: título de seção do termo chega ao papel marcado como título', () => {
+  const doc = documentoTermo(ana, { ...TERMO, texto: '# 2. Condições\n\nDeclaro.' });
+  assert.deepEqual(doc.paragrafos, [{ texto: '2. Condições', titulo: true }, { texto: 'Declaro.', titulo: false }]);
 });
 
 test('documento: termo em rascunho sai marcado como rascunho', () => {

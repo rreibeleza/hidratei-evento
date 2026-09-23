@@ -1,6 +1,34 @@
 import { test, expect } from '@playwright/test';
+import http from 'node:http';
+import { cp, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 const TELAS = 'test-results/telas';
+
+// Cópia de docs/ num servidor só deste teste: dá para "publicar" uma versão nova por cima sem mexer no que os outros servem.
+const TIPOS = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json' };
+async function servirCopia() {
+  const dir = await mkdtemp(path.join(tmpdir(), 'hidratei-'));
+  await cp('docs', dir, { recursive: true });
+  let buscasDoSW = 0;
+  const servidor = http.createServer(async (req, res) => {
+    const caminho = new URL(req.url, 'http://x').pathname;
+    if (caminho === '/sw.js') buscasDoSW++;
+    const arq = path.join(dir, caminho.replace(/\/$/, '/index.html'));
+    try {
+      const corpo = await readFile(arq);
+      res.writeHead(200, { 'content-type': TIPOS[path.extname(arq)] ?? 'application/octet-stream' });
+      res.end(corpo);
+    } catch { res.writeHead(404); res.end(); }
+  });
+  await new Promise((ok) => servidor.listen(0, '127.0.0.1', ok));
+  const publicar = async (arquivo, de, para) => writeFile(path.join(dir, arquivo), (await readFile(path.join(dir, arquivo), 'utf8')).replace(de, para));
+  return {
+    url: `http://127.0.0.1:${servidor.address().port}/`, publicar, buscasDoSW: () => buscasDoSW,
+    fechar: async () => { servidor.close(); await rm(dir, { recursive: true, force: true }); },
+  };
+}
 
 async function cadastrar(page, { nome = 'Ana Souza', cpf = '52998224725', nasc = '10031995', cel = '31998765432' } = {}) {
   await page.getByRole('button', { name: 'Quero participar' }).click();
@@ -19,13 +47,33 @@ async function assinar(page) {
   await page.mouse.up();
 }
 
-async function lerAceitarAssinar(page) {
+async function tirarFoto(page) {
+  await page.getByRole('button', { name: 'Abrir câmera' }).click();
+  await page.getByRole('button', { name: 'Tirar foto' }).click();
+  await expect(page.locator('#foto-miniatura')).toBeVisible();
+}
+
+// Espera a tela do termo antes de rolar: o "Continuar" é assíncrono, e rolar antes do texto chegar não libera o aceite.
+async function lerEAceitar(page) {
   await expect(page.locator('#termo')).toBeVisible();
   await page.locator('#termo-texto').evaluate((e) => e.scrollTo(0, e.scrollHeight));
   await page.getByLabel('Li e concordo').check();
+}
+
+async function lerAceitarAssinar(page) {
+  await lerEAceitar(page);
+  await tirarFoto(page);
   await assinar(page);
   await page.getByRole('button', { name: 'Assinar e confirmar' }).click();
 }
+
+// Largura × altura da foto guardada no registro do 1º participante.
+const fotoGuardada = (page) => page.evaluate(async () => {
+  const { listar } = await import('./banco.js');
+  const [p] = await listar();
+  const img = await createImageBitmap(await (await fetch(p.foto)).blob());
+  return { tipo: p.foto.slice(0, 23), largura: img.width, altura: img.height };
+});
 
 async function entrarPromotora(page) {
   await page.getByRole('button', { name: 'Promotora' }).click();
@@ -43,26 +91,120 @@ async function registrarTempo(page, nome, min, seg) {
 test.describe('sem service worker', () => {
   test.use({ serviceWorkers: 'block' });
 
-  test('termo: confirmar só libera depois de ler até o fim, aceitar e assinar', async ({ page }) => {
+  test('termo: confirmar só libera depois de ler até o fim, aceitar, assinar e tirar a foto', async ({ page }) => {
     await page.goto('/');
     await cadastrar(page);
     const confirmar = page.getByRole('button', { name: 'Assinar e confirmar' });
     const aceite = page.getByLabel('Li e concordo');
-    await expect(page.getByText('RASCUNHO')).toBeVisible();
-    await expect(page.locator('#termo-texto')).toContainText('Participante: Ana Souza — CPF 529.982.247-25');
+    const texto = page.locator('#termo-texto');
+    await expect(texto).toContainText('Participante: Ana Souza — CPF 529.982.247-25');
+    await expect(texto).toContainText('Termo de Responsabilidade e Ciência de Riscos e Participação Voluntária'); // o título longo abre o texto, não aperta o cabeçalho
+    await expect(texto.locator('h3')).not.toHaveCount(0); // títulos de seção viram título na tela…
+    expect(await texto.innerText()).not.toMatch(/^#/m); // …e o marcador "# " não aparece para o participante
     await expect(aceite).toBeDisabled();
-    await page.locator('#termo-texto').evaluate((e) => e.scrollTo(0, e.scrollHeight));
+    await texto.evaluate((e) => e.scrollTo(0, e.scrollHeight));
     await expect(aceite).toBeEnabled();
     await aceite.check();
     await expect(confirmar).toBeDisabled(); // falta assinar
     await page.screenshot({ path: `${TELAS}/02-termo.png` });
     await assinar(page);
+    await expect(confirmar).toBeDisabled(); // falta a foto
+    await tirarFoto(page);
     await expect(confirmar).toBeEnabled();
+    await page.screenshot({ path: `${TELAS}/02c-termo-com-foto.png`, fullPage: true });
     await page.getByRole('button', { name: 'Limpar' }).click();
     await expect(confirmar).toBeDisabled(); // limpou a assinatura
   });
 
-  test('fluxo completo: brinde abaixo de 6:00, desculpa em 6:00 cravado, ranking em ordem', async ({ page }) => {
+  test('foto: a câmera do app abre, tira a foto, desliga e a foto fica no registro', async ({ page }) => {
+    await page.addInitScript(() => {
+      // espião, não dublê: a câmera continua a (falsa) do Chromium; só guarda os fluxos que ela entregou
+      const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      window.fluxosAbertos = [];
+      navigator.mediaDevices.getUserMedia = async (c) => { const s = await original(c); window.fluxosAbertos.push(s); return s; };
+    });
+    await page.goto('/');
+    await cadastrar(page);
+    await lerEAceitar(page);
+    await expect(page.locator('#foto-miniatura')).toBeHidden();
+    await page.getByRole('button', { name: 'Abrir câmera' }).dblclick(); // toque duplo não abre duas câmeras
+    await expect(page.locator('#camera')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Tirar foto' })).toBeEnabled(); // habilita quando a imagem chega
+    await page.screenshot({ path: `${TELAS}/02b-camera.png` });
+    await page.getByRole('button', { name: 'Tirar foto' }).click();
+    await expect(page.locator('#camera')).toBeHidden();
+    await expect(page.locator('#foto-miniatura')).toHaveAttribute('src', /^data:image\/jpeg;base64,/);
+    const estados = () => page.evaluate(() => window.fluxosAbertos.flatMap((s) => s.getTracks()).map((t) => t.readyState));
+    expect(await estados()).toEqual(['ended']); // uma câmera só, desligada depois da foto
+
+    await page.getByRole('button', { name: 'Tirar outra' }).click(); // refazer abre a câmera de novo
+    await page.getByRole('button', { name: 'Cancelar' }).click();
+    await expect(page.locator('#camera')).toBeHidden();
+    expect(await estados()).toEqual(['ended', 'ended']); // cancelar também desliga
+    await expect(page.locator('#foto-miniatura')).toBeVisible(); // e não apaga a foto já tirada
+
+    await assinar(page);
+    await page.getByRole('button', { name: 'Assinar e confirmar' }).click();
+    await expect(page.locator('#pronto-numero')).toHaveText('001');
+    expect(await fotoGuardada(page)).toEqual({ tipo: 'data:image/jpeg;base64,', largura: 640, altura: 480 });
+  });
+
+  test('foto: câmera do app bloqueada — a câmera do tablet (arquivo) tira a foto, que é reduzida para 640 px', async ({ page }) => {
+    await page.addInitScript(() => {
+      navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('Permission denied', 'NotAllowedError'));
+    });
+    await page.goto('/');
+    await cadastrar(page);
+    await lerEAceitar(page);
+    // foto grande como a da câmera do tablet (2000×1500), feita no próprio navegador
+    const jpeg = Buffer.from(await page.evaluate(() => {
+      const c = document.createElement('canvas');
+      c.width = 2000; c.height = 1500;
+      const g = c.getContext('2d');
+      g.fillStyle = '#803000';
+      g.fillRect(0, 0, c.width, c.height);
+      return c.toDataURL('image/jpeg').split(',')[1];
+    }), 'base64');
+    const seletor = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Abrir câmera' }).click();
+    await (await seletor).setFiles({ name: 'foto.jpg', mimeType: 'image/jpeg', buffer: jpeg });
+    await expect(page.locator('#foto-miniatura')).toHaveAttribute('src', /^data:image\/jpeg;base64,/);
+    await expect(page.locator('#camera')).toBeHidden();
+    await assinar(page);
+    await page.getByRole('button', { name: 'Assinar e confirmar' }).click();
+    await expect(page.locator('#pronto-numero')).toHaveText('001');
+    expect(await fotoGuardada(page)).toEqual({ tipo: 'data:image/jpeg;base64,', largura: 640, altura: 480 });
+  });
+
+  test('foto: uma falha da câmera do app não manda o dia inteiro para a câmera do tablet', async ({ page }) => {
+    await page.addInitScript(() => {
+      // a câmera do app falha só na 1ª vez (ocupada, permissão dispensada); depois volta a ser a (falsa) do Chromium
+      const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      let chamadas = 0;
+      navigator.mediaDevices.getUserMedia = (c) => (++chamadas === 1 ? Promise.reject(new DOMException('ocupada', 'NotReadableError')) : original(c));
+    });
+    await page.goto('/');
+    await cadastrar(page);
+    await lerEAceitar(page);
+    const seletor = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Abrir câmera' }).click();
+    await (await seletor).setFiles({ name: 'foto.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(await page.evaluate(() => {
+      const c = document.createElement('canvas');
+      c.width = 40; c.height = 30;
+      return c.toDataURL('image/jpeg').split(',')[1];
+    }), 'base64') });
+    await expect(page.locator('#foto-miniatura')).toBeVisible();
+    await assinar(page);
+    await page.getByRole('button', { name: 'Assinar e confirmar' }).click();
+    await page.getByRole('button', { name: 'Concluir' }).click();
+
+    await cadastrar(page, { nome: 'Bruno Lima', cpf: '11144477735' });
+    await lerEAceitar(page);
+    await page.getByRole('button', { name: 'Abrir câmera' }).click();
+    await expect(page.locator('#camera')).toBeVisible(); // o 2º participante volta a usar a câmera do app
+  });
+
+  test('fluxo completo: brinde em 6:00 cravado (o termo diz "em até 6 minutos"), desculpa em 6:01, ranking em ordem', async ({ page }) => {
     await page.goto('/');
     await page.screenshot({ path: `${TELAS}/00-inicio.png` });
     await cadastrar(page);
@@ -82,19 +224,19 @@ test.describe('sem service worker', () => {
     await expect(page.locator('#barra-envio')).toContainText('Planilha não configurada');
     await page.screenshot({ path: `${TELAS}/04-lista.png` });
 
-    await registrarTempo(page, 'Ana Souza', '5', '59');
+    await registrarTempo(page, 'Ana Souza', '6', '00');
     await expect(page.locator('#resultado-titulo')).toHaveText('BRINDE!');
-    await expect(page.locator('#resultado-tempo')).toHaveText('5:59');
+    await expect(page.locator('#resultado-tempo')).toHaveText('6:00');
     await page.screenshot({ path: `${TELAS}/05-brinde.png` });
     await page.getByRole('button', { name: 'Voltar à lista' }).click();
 
-    await registrarTempo(page, 'bruno lima', '6', '00');
+    await registrarTempo(page, 'bruno lima', '6', '01');
     await expect(page.locator('#resultado-titulo')).toHaveText('DESCULPA');
     await page.screenshot({ path: `${TELAS}/06-desculpa.png` });
     await page.getByRole('button', { name: 'Voltar à lista' }).click();
 
     await page.getByRole('button', { name: 'Ranking' }).click();
-    await expect(page.locator('#lista-ranking li')).toHaveText([/1º\s*Ana S\.\s*5:59/, /2º\s*Bruno L\.\s*6:00/]);
+    await expect(page.locator('#lista-ranking li')).toHaveText([/1º\s*Ana S\.\s*6:00/, /2º\s*Bruno L\.\s*6:01/]);
     await page.getByRole('button', { name: 'Voltar' }).click();
     await expect(page.locator('#lista-participantes li', { hasText: '002' })).toContainText('Bruno Lima'); // digitado em minúsculas
     await page.screenshot({ path: `${TELAS}/07-ranking.png` });
@@ -133,7 +275,7 @@ test.describe('sem service worker', () => {
     const fs = await import('node:fs/promises');
     const csv = await fs.readFile(await arq.path(), 'utf8');
     expect(csv).toContain('numero;nome;cpf');
-    expect(csv).toContain('1;Ana Souza;529.982.247-25;1995-03-10;(31) 99876-5432;;rascunho-1;');
+    expect(csv).toContain('1;Ana Souza;529.982.247-25;1995-03-10;(31) 99876-5432;;advogada-2026-09-22;'); // versão que não parece data: o Excel não a converte
   });
 
   test('baixar o termo assinado: PDF por participante, sem abrir a tela de tempo', async ({ page }) => {
@@ -153,11 +295,11 @@ test.describe('sem service worker', () => {
     await arq.saveAs(`${TELAS}/termo-001-ana-souza.pdf`);
     const pdf = await fs.readFile(`${TELAS}/termo-001-ana-souza.pdf`, 'latin1');
     expect(pdf.startsWith('%PDF-1.4')).toBe(true);
-    expect(pdf).toMatch(/\/Count 1\b/); // o rascunho atual cabe numa folha
+    expect(pdf.match(/\/Filter \/DCTDecode/g)).toHaveLength(Number(/\/Count (\d+)/.exec(pdf)[1])); // uma imagem por folha
     expect(Number(/\/Filter \/DCTDecode \/Length (\d+)/.exec(pdf)[1])).toBeGreaterThan(30_000); // folha desenhada, não em branco
   });
 
-  test('termo baixado: identificação, aceite e assinatura estão no papel; e-mail longo não vaza da folha', async ({ page }) => {
+  test('termo baixado: identificação, aceite, assinatura e foto estão no papel; nada vaza da margem', async ({ page }) => {
     await page.addInitScript(() => { navigator.canShare = () => false; });
     await page.goto('/');
     await cadastrar(page);
@@ -168,11 +310,13 @@ test.describe('sem service worker', () => {
     await page.getByRole('button', { name: 'Baixar termo de Ana Souza', exact: true }).click();
     const fs = await import('node:fs/promises');
     const pdf = await fs.readFile(await (await download).path(), 'latin1');
-    const jpeg = /\/Filter \/DCTDecode \/Length \d+ >>\nstream\n([\s\S]*?)\nendstream/.exec(pdf)[1];
+    const jpegs = [...pdf.matchAll(/\/Filter \/DCTDecode \/Length \d+ >>\nstream\n([\s\S]*?)\nendstream/g)]
+      .map((j) => Buffer.from(j[1], 'latin1').toString('base64'));
 
-    // Pixels da folha BAIXADA contra a mesma folha redesenhada com uma coisa só trocada: se o desenho pular a
-    // assinatura, a identificação ou o aceite, a variante sai idêntica à original e a diferença dá zero.
-    const m = await page.evaluate(async (jpegB64) => {
+    // Pixels das folhas BAIXADAS contra as mesmas folhas redesenhadas com uma coisa só trocada: se o desenho pular a
+    // assinatura, a foto, a identificação ou o aceite, a variante sai idêntica à original e a diferença dá zero.
+    // A identificação abre a 1ª folha; aceite, assinatura e foto fecham a última.
+    const m = await page.evaluate(async (jpegsB64) => {
       const [{ desenharTermo }, { documentoTermo }, { TERMO }, { listar }] = await Promise.all(
         ['./termo-pdf.js', './logica.js', './termo.js', './banco.js'].map((a) => import(a)));
       const [p] = await listar();
@@ -187,33 +331,41 @@ test.describe('sem service worker', () => {
         if (img) g.drawImage(img, 0, 0);
         return c;
       };
-      const bytes = Uint8Array.from(atob(jpegB64), (ch) => ch.charCodeAt(0));
-      const baixada = pixels(emCanvas(await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }))));
-      const ass = await createImageBitmap(await (await fetch(p.assinatura)).blob());
-      const emBranco = emCanvas(null, ass.width, ass.height).toDataURL('image/png');
-      const diferenca = async (d, assinatura) => {
-        const folha = pixels((await desenharTermo(d, assinatura))[0]);
+      const imagem = async (dataURL) => createImageBitmap(await (await fetch(dataURL)).blob());
+      const baixadas = await Promise.all(jpegsB64.map(async (b64) => pixels(emCanvas(
+        await createImageBitmap(new Blob([Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0))], { type: 'image/jpeg' }))))));
+      const ultima = baixadas.length - 1;
+      const emBranco = async (dataURL) => { const img = await imagem(dataURL); return emCanvas(null, img.width, img.height).toDataURL('image/png'); };
+      const diferenca = async (d, assinatura, foto, i) => {
+        const folha = pixels((await desenharTermo(d, assinatura, foto))[i]);
         let n = 0;
-        for (let i = 1; i < folha.length; i += 4) if (Math.abs(folha[i] - baixada[i]) > 80) n++;
+        for (let k = 1; k < folha.length; k += 4) if (Math.abs(folha[k] - baixadas[i][k]) > 80) n++;
         return n;
       };
       const trocar = (rotulo, valor) => ({ ...doc, identificacao: doc.identificacao.map(([r, v]) => (r === rotulo ? [r, valor] : [r, v])) });
-      const [comEmail] = await desenharTermo(
-        { ...doc, identificacao: [...doc.identificacao, ['E-mail', 'maria.eduarda.albuquerque.nascimento@estudante.universidadefederaldeminasgerais.edu.br']] }, p.assinatura);
-      const px = pixels(comEmail);
+      const comEmail = await desenharTermo(
+        { ...doc, identificacao: [...doc.identificacao, ['E-mail', 'maria.eduarda.albuquerque.nascimento@estudante.universidadefederaldeminasgerais.edu.br']] }, p.assinatura, p.foto);
       let tintaForaDaMargem = 0;
-      for (let y = 0; y < comEmail.height; y++) for (let x = 1131; x < comEmail.width; x++) if (px[(y * comEmail.width + x) * 4 + 1] < 200) tintaForaDaMargem++;
+      for (const folha of comEmail) {
+        const px = pixels(folha);
+        for (let y = 0; y < folha.height; y++) for (let x = 1131; x < folha.width; x++) if (px[(y * folha.width + x) * 4 + 1] < 200) tintaForaDaMargem++;
+      }
+      const iguais = [];
+      for (let i = 0; i < baixadas.length; i++) iguais.push(await diferenca(doc, p.assinatura, p.foto, i));
       return {
-        igual: await diferenca(doc, p.assinatura),
-        semAssinatura: await diferenca(doc, emBranco),
-        outroNascimento: await diferenca(trocar('Nascimento', '00/00/0000'), p.assinatura),
-        outroAceite: await diferenca({ ...doc, aceite: 'Xxxxxxx xx xxxxxxx xxxxxxx.' }, p.assinatura),
+        iguais,
+        semAssinatura: await diferenca(doc, await emBranco(p.assinatura), p.foto, ultima),
+        semFoto: await diferenca(doc, p.assinatura, await emBranco(p.foto), ultima),
+        outroNascimento: await diferenca(trocar('Nascimento', '00/00/0000'), p.assinatura, p.foto, 0),
+        outroAceite: await diferenca({ ...doc, aceite: 'Xxxxxxx xx xxxxxxx xxxxxxx.' }, p.assinatura, p.foto, ultima),
         tintaForaDaMargem,
       };
-    }, Buffer.from(jpeg, 'latin1').toString('base64'));
-    // Medido em 20/09: igual 0 · sem assinatura 2392 · outro nascimento 1246 · outro aceite 6438.
-    expect(m.igual).toBeLessThan(50); // a folha baixada É a deste participante (só ruído de JPEG)
+    }, jpegs);
+    console.log('medidas do termo baixado:', JSON.stringify(m));
+    // Medido em 20/09 (1 folha, sem foto): igual 0 · sem assinatura 2392 · outro nascimento 1246 · outro aceite 6438.
+    expect(Math.max(...m.iguais)).toBeLessThan(50); // cada folha baixada É a deste participante (só ruído de JPEG)
     expect(m.semAssinatura).toBeGreaterThan(500);
+    expect(m.semFoto).toBeGreaterThan(500);
     expect(m.outroNascimento).toBeGreaterThan(300);
     expect(m.outroAceite).toBeGreaterThan(500);
     expect(m.tintaForaDaMargem).toBe(0);
@@ -304,6 +456,37 @@ test.describe('sem service worker', () => {
     expect(recebidos[1].participante).toMatchObject({ tempo: '5:32', resultado: 'brinde', tempoSeg: 332 });
     await expect(page.locator('#barra-envio')).toContainText('tudo na planilha');
   });
+});
+
+test('versão nova: com o app aberto o dia todo, ela entra sozinha ao voltar ao início e ao reabrir a tela', async ({ page }) => {
+  const site = await servirCopia();
+  try {
+    // Todo carregamento de página faz o Chrome checar o sw.js ~1,5 s depois (medido em 23/09). O teste espera essa checagem
+    // passar antes de publicar: senão é ela que acha a versão nova, e o teste fica verde sem o app pedir nada.
+    const esperarChecagemDoNavegador = async () => {
+      const antes = site.buscasDoSW();
+      await expect.poll(site.buscasDoSW, { timeout: 8000 }).toBeGreaterThan(antes);
+    };
+    await page.goto(site.url);
+    await page.waitForFunction(() => navigator.serviceWorker.controller);
+    await page.reload(); // como no tablet: o app já abre sob o service worker
+    await esperarChecagemDoNavegador();
+    await expect(page.locator('.hero-sub').first()).toContainText('em até');
+
+    await site.publicar('sw.js', /const VERSAO = '[^']+'/, "const VERSAO = 'v-nova'");
+    await site.publicar('index.html', 'e ganhe um brinde.', 'e ganhe um brinde. VERSÃO NOVA');
+    await page.getByRole('button', { name: 'Quero participar' }).click();
+    await page.getByRole('button', { name: 'Voltar' }).click(); // participante desiste: volta ao início
+    await expect(page.locator('.hero-sub').first()).toContainText('VERSÃO NOVA', { timeout: 10_000 });
+    await esperarChecagemDoNavegador(); // a troca recarregou a página: de novo, deixa a checagem do navegador passar
+
+    await site.publicar('sw.js', "const VERSAO = 'v-nova'", "const VERSAO = 'v-nova-2'");
+    await site.publicar('index.html', 'VERSÃO NOVA', 'VERSÃO NOVA 2');
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); // tablet acordado já na tela inicial
+    await expect(page.locator('.hero-sub').first()).toContainText('VERSÃO NOVA 2', { timeout: 10_000 });
+  } finally {
+    await site.fechar();
+  }
 });
 
 test('offline: o app abre sem internet e o cadastro sobrevive a recarregar', async ({ page, context }) => {

@@ -1,9 +1,9 @@
 # Desafio 1 km Hidratei — app do tablet
 
-PWA offline do evento de 24/09/2026: o participante preenche os dados, lê e assina o termo; a promotora
-(PIN) registra o tempo do 1 km — abaixo de 6:00 ganha brinde. Tudo fica salvo no tablet (IndexedDB) e sobe
+PWA offline do evento de 24/09/2026: o participante preenche os dados, lê o termo, tira uma foto e assina; a
+promotora (PIN) registra o tempo do 1 km — até 6:00, inclusive, ganha brinde (o termo diz "em até 6 minutos"). Tudo fica salvo no tablet (IndexedDB) e sobe
 para uma Google Sheet quando há internet. Plano B: **Exportar CSV** na área da promotora. O botão **Termo** de
-cada participante gera ali mesmo, sem internet, o PDF do termo assinado (dados, texto, data/hora e assinatura).
+cada participante gera ali mesmo, sem internet, o PDF do termo assinado (dados, texto, data/hora, assinatura e foto).
 
 - `docs/` — o site (GitHub Pages publica esta pasta). Sem build.
 - `docs/termo.js` — **o texto do termo** (único lugar). `docs/config.js` — URL da planilha, token, PIN.
@@ -14,7 +14,7 @@ cada participante gera ali mesmo, sem internet, o PDF do termo assinado (dados, 
 
 ```sh
 npm test                 # regras (CPF, idade, tempo, brinde, ranking, fila de envio)
-npx playwright test      # fluxo no tablet: cadastro → termo → tempo → ranking, envio e offline
+npx playwright test      # fluxo no tablet: cadastro → termo → foto → tempo → ranking, PDF, envio e offline
 ```
 
 ## Planilha (uma vez)
@@ -27,4 +27,8 @@ npx playwright test      # fluxo no tablet: cadastro → termo → tempo → ran
 ## No tablet (antes do evento, com internet)
 
 Abra o link no Chrome (Android) ou Safari (iPad) → **Adicionar à tela inicial** → abra pelo ícone uma vez
-com internet. Daí em diante funciona sem sinal.
+com internet. Daí em diante funciona sem sinal. A tela inicial dizendo "em até **6 minutos**" é a versão com foto.
+
+Libere a câmera antes do público chegar: faça um cadastro de teste até o termo → **Abrir câmera** → **Permitir**
+→ **Cancelar** e volte (sem "Assinar e confirmar" nada é gravado). Se a câmera do app for bloqueada, o botão passa
+a abrir a câmera do próprio tablet — funciona igual, só sai do app para tirar a foto.

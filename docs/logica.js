@@ -1,6 +1,6 @@
 // Regras puras do app — sem DOM, sem armazenamento. Testadas em test/logica.test.js.
 
-export const LIMITE_BRINDE_SEG = 6 * 60; // "menos de 6 minutos" ganha brinde
+export const LIMITE_BRINDE_SEG = 6 * 60; // o termo diz "em até 6 (seis) minutos": 6:00 cravado ganha brinde
 export const IDADE_MINIMA = 18;
 
 const digitos = (s) => String(s ?? '').replace(/\D/g, '');
@@ -54,7 +54,7 @@ export function formatTempo(seg) {
 
 export function resultado(seg) {
   if (seg == null) return null;
-  return seg < LIMITE_BRINDE_SEG ? 'brinde' : 'desculpa';
+  return seg <= LIMITE_BRINDE_SEG ? 'brinde' : 'desculpa';
 }
 
 export function ranking(participantes) {
@@ -107,7 +107,8 @@ export const pendentes = (lista) =>
   lista.filter((p) => p.rev > (p.revSincronizada ?? 0)).sort((a, b) => a.numero - b.numero);
 
 export function payloadEnvio(p) {
-  const { rev, revSincronizada, assinaturaSincronizada, assinatura, ...resto } = p;
+  // A foto fica só no tablet (vai para o PDF do termo): a planilha não a guarda, e reenviá-la a cada revisão pesaria no 4G.
+  const { rev, revSincronizada, assinaturaSincronizada, assinatura, foto, ...resto } = p;
   const dados = { ...resto, tempo: formatTempo(p.tempoSeg), resultado: resultado(p.tempoSeg) ?? '' };
   return assinaturaSincronizada ? dados : { ...dados, assinatura };
 }
@@ -135,6 +136,10 @@ export const nomeProprio = (nome) => nome.trim().toLowerCase().split(/\s+/)
   .map((p, i) => (i > 0 && PARTICULAS.has(p) ? p : p.replace(/(^|-)(\p{L})/gu, (_, h, l) => h + l.toUpperCase())))
   .join(' ');
 
+// Parágrafos do termo (separados por linha em branco). O que começa com "# " é título de seção: sai em destaque.
+export const paragrafosTermo = (texto) => texto.split(/\n\s*\n/).map((t) => t.trim())
+  .map((t) => (t.startsWith('# ') ? { texto: t.slice(2).trim(), titulo: true } : { texto: t, titulo: false }));
+
 // Termo assinado para baixar. Cada registro guarda a VERSÃO que a pessoa aceitou, não o texto: se o texto do
 // aparelho já é de outra versão, o documento diz isso em vez de imprimir o texto atual como se fosse o assinado.
 export function documentoTermo(p, termo) {
@@ -152,9 +157,10 @@ export function documentoTermo(p, termo) {
       ...(p.email ? [['E-mail', p.email]] : []),
     ],
     paragrafos: textoDisponivel
-      ? termo.texto.split(/\n\s*\n/).map((t) => t.trim())
-      : [`Este participante assinou a versão "${p.termoVersao}" do termo. O texto guardado neste aparelho já é o da versão "${termo.versao}", por isso não é reproduzido aqui: consulte o texto arquivado da versão "${p.termoVersao}".`],
+      ? paragrafosTermo(termo.texto)
+      : [{ texto: `Este participante assinou a versão "${p.termoVersao}" do termo. O texto guardado neste aparelho já é o da versão "${termo.versao}", por isso não é reproduzido aqui: consulte o texto arquivado da versão "${p.termoVersao}".`, titulo: false }],
     aceite: `Li e concordo com o termo acima. Aceito e assinado em ${new Date(p.aceitoEm).toLocaleString('pt-BR')}.`,
+    legendaFoto: 'Foto tirada no ato da assinatura',
     rodape: `Versão do termo: ${p.termoVersao} · Registro: ${p.id}`,
   };
 }

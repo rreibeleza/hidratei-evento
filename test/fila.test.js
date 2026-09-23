@@ -50,3 +50,7 @@ test('payload: leva tempo formatado e resultado prontos — a regra do brinde mo
   assert.equal(semTempo.tempo, '');
   assert.equal(semTempo.resultado, '');
 });
+
+test('payload: a foto fica no tablet — não viaja para a planilha', () => {
+  assert.equal('foto' in payloadEnvio({ ...base, rev: 1, foto: 'data:image/jpeg;base64,BBBB' }), false);
+});
